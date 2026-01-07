@@ -213,7 +213,7 @@ class _DrugResponsePytorchDataset(PytorchDataset):
         return drug_graph, cell_feat, response
 
 
-class DrugGNN(DRPModel):
+class DrugGNN_External(DRPModel):
     """DrugGNN model."""
 
     def __init__(self):

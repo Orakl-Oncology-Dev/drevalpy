@@ -140,7 +140,7 @@ def test_drevalpy_argument_setup_with_external_model(tmp_path):
     args_dict = {
         "run_id": "test_run_external",
         "dataset_name": "TOYv1",
-        "models": ["ElasticNet", "DrugGNN:models/external_model/drug_gnn.py"],
+        "models": ["ElasticNet", "DrugGNN_External:models/external_model/drug_gnn.py"],
         "baselines": ["NaiveMeanEffectsPredictor"],
         "test_mode": ["LPO"],
         "randomization_mode": ["None"],
@@ -166,7 +166,7 @@ def test_drevalpy_argument_setup_with_external_model(tmp_path):
 
     # Normalize models (register external) and then run the usual argument checks
     normalize_models_and_register_externals(args)
-    assert args.models == ["ElasticNet", "DrugGNN"]
+    assert args.models == ["ElasticNet", "DrugGNN_External"]
 
     # Should not raise
     check_arguments(args)
