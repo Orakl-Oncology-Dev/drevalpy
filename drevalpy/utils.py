@@ -1,6 +1,7 @@
 """Utility functions for the evaluation pipeline."""
 
 import argparse
+import importlib.util
 from pathlib import Path
 
 from sklearn.base import TransformerMixin
@@ -12,7 +13,7 @@ from .datasets.loader import load_dataset
 from .datasets.utils import ALLOWED_MEASURES
 from .evaluation import AVAILABLE_METRICS
 from .experiment import drug_response_experiment, pipeline_function
-from .models import MODEL_FACTORY
+from .models import DRPModel, MODEL_FACTORY, MULTI_DRUG_MODEL_FACTORY, SINGLE_DRUG_MODEL_FACTORY
 
 
 def get_parser() -> argparse.ArgumentParser:
@@ -39,7 +40,13 @@ def get_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--models",
         nargs="+",
-        help="model to evaluate or list of models to compare",
+        help=(
+            "Model(s) to evaluate. Each entry can be either a model name present in MODEL_FACTORY "
+            "(e.g. 'NaiveDrugMeanPredictor') or an external model specified as "
+            "'ClassName:/abs/path/to/script.py'. Multiple models can be provided either as separate "
+            "arguments or as a single comma-separated string, e.g. "
+            "'NaiveDrugMeanPredictor,DrugGNN:/path/to/drug_gnn.py'."
+        ),
     )
     parser.add_argument(
         "--baselines",
@@ -206,6 +213,74 @@ def get_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def normalize_models_and_register_externals(args) -> None:
+    """
+    Normalize args.models and register external DRPModel classes specified via class:path syntax.
+
+    This function supports the following syntax for each raw entry in args.models:
+    - "ModelName"                 -> looked up directly in MODEL_FACTORY
+    - "ClassName:/abs/path/to.py" -> dynamically import ClassName from file and register it
+    """
+    if not getattr(args, "models", None):
+        return
+
+    normalized_models: list[str] = []
+
+    for raw in args.models:
+        if not raw:
+            continue
+        spec = raw.strip()
+        if not spec:
+            continue
+
+        if ":" not in spec:
+            # Plain model name, handled later by existing validation
+            normalized_models.append(spec)
+            continue
+
+        class_name, file_path = spec.split(":", 1)
+        class_name = class_name.strip()
+        file_path = file_path.strip()
+        if not class_name or not file_path:
+            raise ValueError(
+                f"Invalid model specification '{spec}'. Expected 'ClassName:/abs/path/to/script.py'."
+            )
+
+        # Dynamically load module from the given file path
+        spec_obj = importlib.util.spec_from_file_location(f"external_{class_name}", file_path)
+        if spec_obj is None or spec_obj.loader is None:
+            raise ImportError(f"Could not load external model module from '{file_path}'.")
+
+        module = importlib.util.module_from_spec(spec_obj)
+        spec_obj.loader.exec_module(module)
+
+        try:
+            cls = getattr(module, class_name)
+        except AttributeError as exc:
+            msg = (
+                f"External model class '{class_name}' not found in '{file_path}'. "
+                "Ensure the file defines a class with this exact name."
+            )
+            raise AttributeError(msg) from exc
+
+        if not isinstance(cls, type) or not issubclass(cls, DRPModel):
+            raise TypeError(
+                f"External model '{class_name}' from '{file_path}' must be a subclass of DRPModel."
+            )
+
+        # Decide whether this is a single-drug model
+        is_single = bool(getattr(cls, "is_single_drug_model", False))
+        if is_single:
+            SINGLE_DRUG_MODEL_FACTORY[class_name] = cls
+        else:
+            MULTI_DRUG_MODEL_FACTORY[class_name] = cls
+
+        MODEL_FACTORY[class_name] = cls
+        normalized_models.append(class_name)
+
+    args.models = normalized_models
+
+
 def check_arguments(args) -> None:
     """
     Check the validity of the arguments for the evaluation pipeline.
@@ -305,6 +380,7 @@ def main(args) -> None:
 
     :param args: passed from command line
     """
+    normalize_models_and_register_externals(args)
     check_arguments(args)
     response_data, cross_study_datasets = get_datasets(
         dataset_name=args.dataset_name,

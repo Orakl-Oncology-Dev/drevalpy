@@ -7,7 +7,7 @@ from argparse import Namespace
 
 import pytest
 
-from drevalpy.utils import check_arguments, get_parser, main
+from drevalpy.utils import check_arguments, get_parser, main, normalize_models_and_register_externals
 from drevalpy.visualization.create_report import create_report
 from drevalpy.visualization.utils import (
     create_output_directories,
@@ -131,3 +131,42 @@ def test_drevalpy_main(args):
 
         # Verify output directories exist (from report generation)
         create_output_directories(result_path, args.run_id)
+
+
+def test_drevalpy_argument_setup_with_external_model(tmp_path):
+    """
+    Ensure that an external model specified as ClassName:/path is normalized and passes argument checks.
+    """
+    args_dict = {
+        "run_id": "test_run_external",
+        "dataset_name": "TOYv1",
+        "models": ["ElasticNet", "DrugGNN:models/external_model/drug_gnn.py"],
+        "baselines": ["NaiveMeanEffectsPredictor"],
+        "test_mode": ["LPO"],
+        "randomization_mode": ["None"],
+        "randomization_type": "permutation",
+        "n_trials_robustness": 0,
+        "cross_study_datasets": [],
+        "no_refitting": True,
+        "curve_curator_cores": 1,
+        "measure": "LN_IC50",
+        "overwrite": False,
+        "optim_metric": "RMSE",
+        "n_cv_splits": 2,
+        "response_transformation": "None",
+        "multiprocessing": False,
+        "path_data": "../data",
+        "model_checkpoint_dir": "TEMPORARY",
+        "no_hyperparameter_tuning": True,
+        "final_model_on_full_data": False,
+        "path_out": str(tmp_path),
+    }
+
+    args = Namespace(**args_dict)
+
+    # Normalize models (register external) and then run the usual argument checks
+    normalize_models_and_register_externals(args)
+    assert args.models == ["ElasticNet", "DrugGNN"]
+
+    # Should not raise
+    check_arguments(args)
